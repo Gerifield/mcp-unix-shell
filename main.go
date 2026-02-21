@@ -42,10 +42,11 @@ type ShellServer struct {
 	commandHistory   []CommandExecution
 	historyMutex     sync.Mutex
 	server           *server.MCPServer
+	addr             string
 }
 
 // NewShellServer creates a new shell server with the given allowed commands
-func NewShellServer(allowedCommands string) (*ShellServer, error) {
+func NewShellServer(allowedCommands string, addr string) (*ShellServer, error) {
 	var cmdList []string
 	allowAll := false
 
@@ -72,6 +73,7 @@ func NewShellServer(allowedCommands string) (*ShellServer, error) {
 			"0.1.0",
 			server.WithResourceCapabilities(false, false),
 		),
+		addr: addr,
 	}
 
 	// Register tool handlers
@@ -220,7 +222,7 @@ func (s *ShellServer) handleExecuteCommand(
 	ctx context.Context,
 	request mcp.CallToolRequest,
 ) (*mcp.CallToolResult, error) {
-	command, ok := request.Params.Arguments["command"].(string)
+	command, ok := request.GetArguments()["command"].(string)
 	if !ok {
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{
@@ -235,7 +237,7 @@ func (s *ShellServer) handleExecuteCommand(
 
 	// Get optional shell parameter
 	shell := DEFAULT_SHELL
-	if shellArg, ok := request.Params.Arguments["shell"].(string); ok && shellArg != "" {
+	if shellArg, ok := request.GetArguments()["shell"].(string); ok && shellArg != "" {
 		shell = shellArg
 	}
 
@@ -291,7 +293,7 @@ func (s *ShellServer) handleListRecentCommands(
 ) (*mcp.CallToolResult, error) {
 	// Get optional limit parameter
 	limit := DEFAULT_LIMIT
-	if limitArg, ok := request.Params.Arguments["limit"].(float64); ok {
+	if limitArg, ok := request.GetArguments()["limit"].(float64); ok {
 		limit = int(limitArg)
 	}
 
@@ -385,12 +387,19 @@ func (s *ShellServer) handleListAllowedCommands(
 }
 
 func (s *ShellServer) Serve() error {
+	if s.addr != "" {
+		log.Printf("Starting server on %s", s.addr)
+		return server.NewStreamableHTTPServer(s.server).Start(s.addr)
+	}
+
+	log.Println("Starting server on stdio")
 	return server.ServeStdio(s.server)
 }
 
 func main() {
 	// Parse command line flags
 	allowedCommandsFlag := flag.String("allowed-commands", "", "Comma-separated list of allowed commands or '*' to allow all commands")
+	addr := flag.String("addr", "", "Address to listen on like ':8080' (empty to use stdio)")
 	flag.Parse()
 
 	if *allowedCommandsFlag == "" {
@@ -401,7 +410,7 @@ func main() {
 	}
 
 	// Create and start the server
-	shellServer, err := NewShellServer(*allowedCommandsFlag)
+	shellServer, err := NewShellServer(*allowedCommandsFlag, *addr)
 	if err != nil {
 		log.Fatalf("Failed to create server: %v", err)
 	}
